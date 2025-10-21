@@ -219,13 +219,23 @@ app.get("/api/leaderboard", async (req, res) => {
 const clientPath = path.join(__dirname, "client", "build");
 app.use(express.static(clientPath));
 
-app.get("/*", (req, res) => {
-  res.sendFile(path.join(clientPath, "index.html"));
+// Serve React app correctly
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files from React
+app.use(express.static(path.join(__dirname, "client", "build")));
+
+// API routes above here ...
+
+// Fallback route — serve React for any non-API routes
+app.get(/^\/(?!api).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, "client", "build", "index.html"));
 });
 
-// -------------------------------
-// Start server
-// -------------------------------
 app.listen(PORT, () => {
   console.log(`🚀 Spinnergy server running on port ${PORT}`);
 });
