@@ -1,24 +1,52 @@
 {
   "name": "spinnergy-single-service",
   "version": "1.0.0",
-  "private": true,
+  "description": "Spinnergy unified full-stack app with integrated AI, Nutritionix, Firebase, MongoDB, and Microbit sync.",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "install-all": "npm --prefix client install && npm --prefix . install",
-    "build-client": "npm --prefix client run build",
-    "build-and-copy": "node ./scripts/build-and-copy.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "cd client && npm install && npm run build",
+    "build-and-start": "npm run build && node server.js",
+    "postinstall": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   },
   "dependencies": {
-    "axios": "^1.4.0",
-    "express": "^4.18.2",
-    "helmet": "^7.0.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "jsonwebtoken": "^9.0.0",
-    "bcryptjs": "^2.4.3",
-    "lowdb": "^6.0.1"
-    "openai": "^1.0.0"
-    "mongoose": "^1.0.0"
+    "express": "^4.19.2",
+    "firebase-admin": "^12.5.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "lowdb": "^7.0.1",
+    "mongoose": "^8.5.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.54.0",
+    "path-to-regexp": "^6.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-scripts": "^5.0.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "nodemon": "^3.1.2"
+  },
+  "keywords": [
+    "spinnergy",
+    "nutrition",
+    "health",
+    "ai",
+    "microbit",
+    "fitness",
+    "render-deploy"
+  ],
+  "license": "MIT",
+  "author": "Srivats Srihari",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Srivats-Srihari/Spinnergy_V2"
+  }
 }
