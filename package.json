@@ -1,0 +1,22 @@
+{
+  "name": "spinnergy-single-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install-all": "npm --prefix client install && npm --prefix . install",
+    "build-client": "npm --prefix client run build",
+    "build-and-copy": "node ./scripts/build-and-copy.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "jsonwebtoken": "^9.0.0",
+    "bcryptjs": "^2.4.3",
+    "lowdb": "^6.0.1"
+  },
+  "devDependencies": {}
+}

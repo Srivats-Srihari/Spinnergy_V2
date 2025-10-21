@@ -1,0 +1,5 @@
+
+Micro:bit wiring (simple)
+- JST battery -> micro:bit EXT pins or battery connector
+- LED: microbit pin0 -> 220R -> LED(+) -> LED(-) -> GND
+- Button: use micro:bit built-in buttons A/B for tetris input

@@ -1,0 +1,24 @@
+/* ui.css - core design tokens and components */
+:root{
+  --bg: #0f172a;
+  --card-bg: #ffffff;
+  --muted: #6b7280;
+  --primary: #06b6d4;
+  --accent: #7c3aed;
+  --radius: 12px;
+}
+body{ font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#f7fafc, #eef2ff); color: #0f172a; margin:0; padding:0; }
+.app-shell { padding:18px; max-width:1200px; margin:0 auto; }
+.card{ background:var(--card-bg); border-radius:var(--radius); padding:14px; box-shadow: 0 6px 22px rgba(2,6,23,0.06); }
+.btn{ display:inline-block; padding:8px 12px; border-radius:10px; cursor:pointer; border:none; }
+.btn-primary{ background: linear-gradient(90deg,var(--primary), #0891b2); color:white; }
+.btn-ghost{ background:transparent; border:1px solid #e6e8eb; }
+
+/* accessible focus styles */
+:focus { outline: 3px solid rgba(99,102,241,0.18); outline-offset:3px; }
+
+/* responsive tweaks */
+@media (max-width: 900px) {
+  .app-shell { padding:10px; }
+  .card { padding:10px; }
+}
