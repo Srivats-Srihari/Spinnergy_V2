@@ -1,241 +1,100 @@
-// -------------------------------
-// Spinnergy Unified Server
-// -------------------------------
-
 import express from "express";
-import dotenv from "dotenv";
-import cors from "cors";
-import helmet from "helmet";
 import path from "path";
-import { fileURLToPath } from "url";
-import mongoose from "mongoose";
+import dotenv from "dotenv";
+import helmet from "helmet";
+import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import fetch from "node-fetch";
-import { Low } from "lowdb";
-import { JSONFile } from "lowdb/node";
-import { OpenAI } from "openai";
-import admin from "firebase-admin";
+import mongoose from "mongoose";
+import OpenAI from "openai";
 
-// -------------------------------
-// Environment setup
-// -------------------------------
 dotenv.config();
+const __dirname = path.resolve();
 const app = express();
-const PORT = process.env.PORT || 8080;
-
-// For __dirname compatibility with ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// -------------------------------
-// Middleware
-// -------------------------------
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json());
 app.use(cors());
 app.use(helmet());
-app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
 
-// -------------------------------
-// MongoDB connection
-// -------------------------------
-if (process.env.MONGO_URI) {
-  mongoose
-    .connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    })
-    .then(() => console.log("✅ MongoDB connected"))
-    .catch((err) => console.error("❌ MongoDB connect failed:", err.message));
-} else {
-  console.warn("⚠️ No MongoDB URI found. MongoDB features disabled.");
-}
+const PORT = process.env.PORT || 5000;
 
-// -------------------------------
-// Firebase Admin SDK
-// -------------------------------
-try {
-  const firebaseConfig = {
-    type: process.env.FB_TYPE,
-    project_id: process.env.FB_PROJECT_ID,
-    private_key_id: process.env.FB_PRIVATE_KEY_ID,
-    private_key: process.env.FB_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    client_email: process.env.FB_CLIENT_EMAIL,
-    client_id: process.env.FB_CLIENT_ID,
-    auth_uri: process.env.FB_AUTH_URI,
-    token_uri: process.env.FB_TOKEN_URI,
-    auth_provider_x509_cert_url: process.env.FB_AUTH_CERT_URL,
-    client_x509_cert_url: process.env.FB_CLIENT_CERT_URL,
-  };
-  if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.cert(firebaseConfig) });
-    console.log("✅ Firebase initialized");
-  }
-} catch (err) {
-  console.warn("⚠️ Firebase not configured:", err.message);
-}
+// ====== MongoDB ======
+mongoose.connect(process.env.MONGO_URI || "", { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log("Mongo connected"))
+  .catch(err => console.error("Mongo failed:", err.message));
 
-// -------------------------------
-// LowDB fallback for caching
-// -------------------------------
-const dbFile = path.join(__dirname, "cache.json");
-const adapter = new JSONFile(dbFile);
-const db = new Low(adapter, { chats: [], meals: [], goals: [], energyPoints: 0 });
-await db.read();
-await db.write();
-
-// -------------------------------
-// OpenAI API setup
-// -------------------------------
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// -------------------------------
-// Nutritionix API setup
-// -------------------------------
-const NUTRITIONIX_APP_ID = process.env.NUTRITIONIX_APP_ID;
-const NUTRITIONIX_APP_KEY = process.env.NUTRITIONIX_APP_KEY;
-
-// -------------------------------
-// Schemas (Mongo)
-// -------------------------------
 const userSchema = new mongoose.Schema({
+  name: String,
   email: String,
-  password: String,
-  preferences: Object,
-  goals: Object,
-  meals: Array,
+  passwordHash: String,
+  score: { type: Number, default: 0 },
   energyPoints: { type: Number, default: 0 },
+  meals: { type: Array, default: [] },
+  chatHistory: { type: Array, default: [] }
 });
+const User = mongoose.model("User", userSchema);
 
-const User = mongoose.models.User || mongoose.model("User", userSchema);
-
-// -------------------------------
-// Auth routes
-// -------------------------------
+// ====== Auth Routes ======
 app.post("/api/register", async (req, res) => {
   try {
-    const { email, password, preferences } = req.body;
-    const hashed = await bcrypt.hash(password, 10);
-    const user = new User({ email, password: hashed, preferences });
-    await user.save();
-    res.json({ message: "✅ Registered successfully" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const { name, email, password } = req.body;
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ message: "Email already used" });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({ name, email, passwordHash });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    res.json({ token, user });
+  } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: "User not found" });
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).json({ error: "Invalid password" });
-
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
-    res.json({ message: "✅ Login successful", token });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) return res.status(400).json({ message: "Invalid credentials" });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    res.json({ token, user });
+  } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// -------------------------------
-// Nutritionix search
-// -------------------------------
-app.get("/api/nutritionix/search", async (req, res) => {
-  const query = req.query.q;
-  if (!query) return res.status(400).json({ error: "Missing query" });
-  try {
-    const response = await fetch("https://trackapi.nutritionix.com/v2/search/instant?query=" + query, {
-      headers: {
-        "x-app-id": NUTRITIONIX_APP_ID,
-        "x-app-key": NUTRITIONIX_APP_KEY,
-      },
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Nutritionix API failed" });
-  }
+// ====== Leaderboard ======
+app.get("/api/leaderboard", async (req, res) => {
+  const users = await User.find().sort({ energyPoints: -1 }).limit(15);
+  res.json(users.map(u => ({ name: u.name, energyPoints: u.energyPoints })));
 });
 
-// -------------------------------
-// AI Chatbot (Food-only assistant)
-// -------------------------------
+// ====== OpenAI Chat Assistant ======
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message } = req.body;
-    const prompt = `You are Spinnergy, a friendly nutrition and food chatbot. Only answer questions related to food, recipes, health, and diet. User asked: ${message}`;
+    const { message, userId } = req.body;
+    const user = await User.findById(userId);
+    const prompt = [
+      { role: "system", content: "You are a helpful AI assistant that only talks about food, nutrition, diet, recipes, and energy goals. No other topics are allowed." },
+      { role: "user", content: message }
+    ];
 
-    const completion = await openai.chat.completions.create({
+    const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 300,
+      messages: prompt,
     });
 
-    const reply = completion.choices[0].message.content;
-    db.data.chats.push({ message, reply, date: new Date().toISOString() });
-    await db.write();
-
+    const reply = response.choices[0].message.content;
+    if (user) {
+      user.chatHistory.push({ user: message, ai: reply, date: new Date() });
+      if (user.chatHistory.length > 30) user.chatHistory.shift();
+      await user.save();
+    }
     res.json({ reply });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Chatbot unavailable" });
-  }
+  } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// -------------------------------
-// Microbit energy sync (simulated)
-// -------------------------------
-app.post("/api/microbit/sync", async (req, res) => {
-  try {
-    const { energy } = req.body;
-    db.data.energyPoints += Number(energy) || 0;
-    await db.write();
-    res.json({ message: "Energy synced", total: db.data.energyPoints });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// -------------------------------
-// Leaderboard simulation
-// -------------------------------
-app.get("/api/leaderboard", async (req, res) => {
-  try {
-    const users = await User.find().sort({ energyPoints: -1 }).limit(10);
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// -------------------------------
-// Serve frontend (React)
-// -------------------------------
+// ====== Serve React build ======
 const clientPath = path.join(__dirname, "client", "build");
 app.use(express.static(clientPath));
+app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(clientPath, "index.html")));
 
-// Serve React app correctly
-import path from "path";
-import { fileURLToPath } from "url";
+app.listen(PORT, () => console.log("✅ Spinnergy running on port", PORT));
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Serve static files from React
-app.use(express.static(path.join(__dirname, "client", "build")));
-
-// API routes above here ...
-
-// Fallback route — serve React for any non-API routes
-app.get(/^\/(?!api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, "client", "build", "index.html"));
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Spinnergy server running on port ${PORT}`);
-});
