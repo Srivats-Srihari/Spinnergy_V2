@@ -6,14 +6,4 @@ services:
     branch: main
     buildCommand: "npm ci && if [ -d './client' ]; then (cd client && npm ci && npm run build); fi"
     startCommand: "node server.js"
-    envVars:
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: NUTRITIONIX_APP_ID
-        sync: false
-      - key: NUTRITIONIX_APP_KEY
-        sync: false
-      - key: MONGO_URI
-        sync: false
-      - key: REDIS_URL
-        sync: false
+    
