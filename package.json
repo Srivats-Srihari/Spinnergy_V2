@@ -17,6 +17,8 @@
     "jsonwebtoken": "^9.0.0",
     "bcryptjs": "^2.4.3",
     "lowdb": "^6.0.1"
+    "openai":"^1.0.0"
+    "mongoose":"^1.0.0"
   },
   "devDependencies": {}
 }
