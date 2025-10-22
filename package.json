@@ -7,7 +7,8 @@
     "build-client": "npm --prefix client run build",
     "build-and-copy": "node ./scripts/build-and-copy.js",
     "start": "node server.js",
-    "install": "npm install && cd client && npm install"
+    "install": "npm install && cd client && npm install",
+    "build": "react-scripts build"
   },
   "dependencies": {
     "axios": "^1.4.0",
