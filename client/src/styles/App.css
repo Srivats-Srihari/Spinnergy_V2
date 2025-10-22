@@ -1,47 +1,48 @@
+
 body {
-  font-family: 'Segoe UI', sans-serif;
   margin: 0;
-  background: #fff9f9;
+  background: linear-gradient(145deg, #e8f6ef, #ffffff);
+  font-family: 'Poppins', sans-serif;
   color: #333;
-  text-align: center;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 .navbar {
+  background-color: #4caf50;
+  color: white;
+  padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: linear-gradient(90deg, #ee0979, #ff6a00);
-  padding: 1rem 2rem;
-  color: white;
 }
 
-.nav-links a {
+.links a {
   color: white;
+  margin: 0 0.8rem;
   text-decoration: none;
-  margin-left: 1rem;
-  font-weight: 600;
+  font-weight: 500;
+  transition: color 0.2s ease;
 }
 
-.nav-links a:hover {
-  text-decoration: underline;
+.links a:hover {
+  color: #ffe57f;
 }
 
-.home-container {
-  padding: 3rem 2rem;
-}
-
-.home-buttons button {
-  margin: 1rem;
-  padding: 0.7rem 1.4rem;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1.1rem;
-  background: #ff6a00;
+.chatbot-toggle {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #ff9800;
   color: white;
-  transition: all 0.3s;
-}
-
-.home-buttons button:hover {
-  background: #ee0979;
+  border: none;
+  border-radius: 50%;
+  padding: 0.8rem 1rem;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
 }
