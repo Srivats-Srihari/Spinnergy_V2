@@ -9,7 +9,7 @@ import ChatBot from "./widgets/ChatBot";
 import NutritionSearch from "./pages/NutritionSearch";
 import MealLogger from "./pages/MealLogger";
 import { useAuth } from "./context/AuthContext";
-import "./ui.css";
+import "./styles/App.css";
 
 export default function App() {
   const { user } = useAuth();
