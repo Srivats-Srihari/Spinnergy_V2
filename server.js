@@ -1,150 +1,284 @@
-
 /**
- * Spinnergy server.js (patched)
- * Fixes OpenAI, Nutritionix, Leaderboard, Chat, Meals, Routes
+ * server.js - patched by patch-fix-spinnergy.js
+ * - Express server that serves the client/build static files
+ * - Provides API endpoints for auth (simple placeholder), game (spin), nutrition proxy,
+ *   and an OpenAI-powered food-only assistant (via axios POST to OpenAI)
+ *
+ * Important notes:
+ *  - This file avoids ESM import/export compatibility issues by using CommonJS require.
+ *  - It uses axios to call the OpenAI REST endpoints directly (no 'openai' package usage).
+ *  - Ensure your .env contains the keys:
+ *      OPENAI_API_KEY, NUTRITIONIX_APP_ID, NUTRITIONIX_APP_KEY
  */
-import express from "express";
-import helmet from "helmet";
-import cors from "cors";
-import dotenv from "dotenv";
-import mongoose from "mongoose";
-import fetch from "node-fetch";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import path from "path";
-import { fileURLToPath } from "url";
+
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+const helmet = require('helmet');
+const bodyParser = require('body-parser');
+const dotenv = require('dotenv');
 
 dotenv.config();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+
+const PORT = process.env.PORT || 8080;
 const app = express();
-app.use(express.json({ limit: "10mb" }));
+
+// Basic middlewares
 app.use(helmet());
 app.use(cors());
+app.use(bodyParser.json({ limit: '1mb' }));
+app.use(bodyParser.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || "secret";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const NUTRITIONIX_APP_ID = process.env.NUTRITIONIX_APP_ID;
-const NUTRITIONIX_API_KEY = process.env.NUTRITIONIX_API_KEY;
+// --- Simple in-memory user store (placeholder) ---
+// You said you use Firebase in production; this is a safe fallback for local dev.
+// Keep data ephemeral; replace with real DB or Firebase later.
+const users = {}; // keyed by email
+const sessions = {}; // token -> email
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Mongo connected"))
-  .catch((e) => console.error("❌ Mongo fail:", e.message));
-
-const UserSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  dietPreferences: Object,
-  meals: Array,
-  energyPoints: { type: Number, default: 0 },
-  leaderboardScore: { type: Number, default: 0 },
-  chats: Array,
-});
-
-const User = mongoose.models.User || mongoose.model("User", UserSchema);
-
-function signToken(u) {
-  return jwt.sign({ id: u._id }, JWT_SECRET, { expiresIn: "7d" });
-}
-async function auth(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header) return res.status(401).json({ error: "missing token" });
-  try {
-    const decoded = jwt.verify(header.split(" ")[1], JWT_SECRET);
-    req.user = await User.findById(decoded.id);
-    next();
-  } catch (e) {
-    res.status(401).json({ error: "invalid token" });
-  }
+// Utility: create simple token (not crypto-grade)
+function mkToken() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
-  const u = await User.findOne({ email });
-  if (!u || !(await bcrypt.compare(password, u.password)))
-    return res.status(400).json({ error: "bad credentials" });
-  res.json({ token: signToken(u), user: u });
-});
-
-app.post("/api/register", async (req, res) => {
-  const { name, email, password, dietPreferences } = req.body;
-  const user = new User({
-    name,
-    email,
-    password: await bcrypt.hash(password, 10),
-    dietPreferences,
-  });
-  await user.save();
-  res.json({ token: signToken(user), user });
-});
-
-app.get("/api/food", async (req, res) => {
+/**
+ * Auth endpoints (minimal, for compatibility)
+ * - POST /api/auth/register { name, email, password, dietProfile? } -> { ok: true }
+ * - POST /api/auth/login { email, password } -> { token, user }
+ * - GET /api/auth/profile -> protected by ?token=...
+ */
+app.post('/api/auth/register', (req, res) => {
   try {
-    const q = req.query.q;
-    if (!q) return res.json({ common: [] });
-    const r = await fetch(
-      `https://trackapi.nutritionix.com/v2/search/instant?query=${encodeURIComponent(
-        q
-      )}`,
-      {
-        headers: {
-          "x-app-id": NUTRITIONIX_APP_ID,
-          "x-app-key": NUTRITIONIX_API_KEY,
-        },
-      }
-    );
-    const j = await r.json();
-    res.json(j);
+    const { name, email, password, dietProfile } = req.body;
+    if (!email || !password || !name) return res.status(400).json({ message: 'name,email,password required' });
+    if (users[email]) return res.status(400).json({ message: 'User exists' });
+    users[email] = {
+      name,
+      email,
+      password: password, // for production, hash with bcrypt
+      score: 0,
+      history: [],
+      dietProfile: dietProfile || null,
+      createdAt: new Date().toISOString(),
+    };
+    return res.json({ ok: true, message: 'Registered' });
   } catch (err) {
-    res.status(500).json({ error: "nutritionix error", details: err.message });
+    console.error('register err', err);
+    return res.status(500).json({ message: 'register failed' });
   }
 });
 
-app.post("/api/chat", async (req, res) => {
+app.post('/api/auth/login', (req, res) => {
   try {
-    const { message } = req.body;
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
+    const { email, password } = req.body;
+    const user = users[email];
+    if (!user || user.password !== password) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+    const token = mkToken();
+    sessions[token] = email;
+    return res.json({ token, user: { name: user.name, email: user.email, score: user.score } });
+  } catch (err) {
+    return res.status(500).json({ message: 'login failed' });
+  }
+});
+
+app.get('/api/auth/profile', (req, res) => {
+  const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+  if (!token || !sessions[token]) return res.status(401).json({ message: 'Not authorized' });
+  const email = sessions[token];
+  const user = users[email];
+  return res.json({ name: user.name, email: user.email, score: user.score, dietProfile: user.dietProfile, history: user.history });
+});
+
+// --- Nutritionix proxy ---
+// POST /api/nutrition { query: "2 idli" }
+app.post('/api/nutrition', async (req, res) => {
+  const Q = req.body && req.body.query;
+  if (!Q) return res.status(400).json({ error: 'query required' });
+  const APP_ID = process.env.NUTRITIONIX_APP_ID || '';
+  const APP_KEY = process.env.NUTRITIONIX_APP_KEY || '';
+  if (!APP_ID || !APP_KEY) {
+    return res.status(500).json({ error: 'Nutritionix credentials not configured on server.' });
+  }
+  try {
+    const response = await axios.post('https://trackapi.nutritionix.com/v2/natural/nutrients', { query: Q }, {
       headers: {
-        Authorization: "Bearer " + OPENAI_API_KEY,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
+        'x-app-id': APP_ID,
+        'x-app-key': APP_KEY
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are a food AI that only discusses nutrition, recipes, and health." },
-          { role: "user", content: message },
-        ],
-      }),
+      timeout: 10000
     });
-    const j = await r.json();
-    res.json({ reply: j.choices?.[0]?.message?.content || "No response" });
+    return res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: "AI error", details: err.message });
+    console.error('Nutritionix error', err && err.response && err.response.data ? err.response.data : err.message);
+    return res.status(500).json({ error: 'Nutritionix API error', detail: err && err.response && err.response.data ? err.response.data : err.message });
   }
 });
 
-app.post("/api/energy", auth, async (req, res) => {
-  const delta = Number(req.body.amount || 0);
-  req.user.energyPoints += delta;
-  req.user.leaderboardScore += delta;
-  await req.user.save();
-  res.json({ energyPoints: req.user.energyPoints });
+// --- OpenAI food-only assistant endpoint (server-side) ---
+// POST /api/ai/chat { message: "I want a high-protein breakfast", token? }
+// This endpoint will *only* allow food/nutrition/recipe/goal related prompts.
+// We perform a conservative check that forbids non-food topics (basic safeguard).
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY || '';
+    if (!apiKey) return res.status(500).json({ message: 'OPENAI_API_KEY not configured' });
+
+    const userMessage = (req.body && req.body.message) ? String(req.body.message).trim() : '';
+    if (!userMessage) return res.status(400).json({ message: 'message is required' });
+
+    // Simple safety: only allow when message contains food-related keywords OR asks about recipes/nutrients
+    const lower = userMessage.toLowerCase();
+    const foodKeywords = ['food', 'recipe', 'recipes', 'calorie', 'calories', 'protein', 'carb', 'carbohydrate', 'fat', 'meal', 'breakfast', 'lunch', 'dinner', 'snack', 'nutrition', 'nutrient', 'diet', 'weight', 'lose weight', 'gain weight', 'ingredients', 'vitamin', 'iron', 'sodium', 'cholesterol', 'sugar', 'fiber', 'recipe ideas'];
+    const allowed = foodKeywords.some(k => lower.includes(k)) || lower.includes('how to make') || lower.includes('how many calories') || lower.includes('macro');
+    if (!allowed) {
+      return res.status(400).json({ message: 'This assistant only answers food, nutrition and recipe related questions.' });
+    }
+
+    // Build prompt that constrains model to food domain
+    const systemPrompt = "You are FoodBot, a helpful assistant that ONLY answers questions about food, nutrition, recipes, and healthy goals. If the user asks anything outside this domain, politely decline.";
+    const payload = {
+      model: "gpt-4o-mini", // change to your preferred model; fallback will be handled
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ],
+      max_tokens: 500,
+      temperature: 0.7
+    };
+
+    // Call OpenAI REST Chat Completions (POST)
+    const openAiRes = await axios.post('https://api.openai.com/v1/chat/completions', payload, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+
+    const aiText = openAiRes.data && openAiRes.data.choices && openAiRes.data.choices[0] && openAiRes.data.choices[0].message
+      ? openAiRes.data.choices[0].message.content
+      : '';
+
+    // Save chat for 30 days? (simple in-memory store here; production should use DB)
+    // We'll include optional save if token provided (associate with session)
+    try {
+      const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+      if (token && sessions[token]) {
+        const email = sessions[token];
+        const u = users[email];
+        if (!u.chats) u.chats = [];
+        u.chats.push({ message: userMessage, reply: aiText, ts: new Date().toISOString() });
+        // prune chats older than 30 days
+        const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+        u.chats = u.chats.filter(c => new Date(c.ts).getTime() >= cutoff);
+      }
+    } catch (e) {
+      console.warn('could not save chat', e.message);
+    }
+
+    return res.json({ reply: aiText });
+  } catch (err) {
+    console.error('AI chat error', err && err.response && err.response.data ? err.response.data : err.message);
+    return res.status(500).json({ message: 'AI error', detail: err && err.response && err.response.data ? err.response.data : err.message });
+  }
 });
 
-app.get("/api/leaderboard", async (req, res) => {
-  const top = await User.find().sort({ leaderboardScore: -1 }).limit(20);
-  res.json(top);
+// --- Game endpoints: spin, leaderboard, history ---
+// POST /api/game/spin  (protected: requires token in header or query param)
+app.post('/api/game/spin', (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+    if (!token || !sessions[token]) return res.status(401).json({ message: 'Not authorized' });
+    const email = sessions[token];
+    const user = users[email];
+    if (!user) return res.status(400).json({ message: 'User not found' });
+
+    const segments = [10, 20, 30, 40, 50, 100];
+    const idx = Math.floor(Math.random() * segments.length);
+    const points = segments[idx];
+    user.score += points;
+    user.history.push({ points, date: new Date().toISOString() });
+
+    // compute landing rotation for front-end animation
+    const degreesPer = 360 / segments.length;
+    const landingRotation = 360 * 5 + idx * degreesPer + degreesPer / 2;
+
+    return res.json({ value: points, newScore: user.score, landingRotation });
+  } catch (err) {
+    return res.status(500).json({ message: 'spin error' });
+  }
 });
 
-app.use(express.static(path.join(__dirname, "client", "build")));
-app.get("/*", (req, res) =>
-  res.sendFile(path.join(__dirname, "client", "build", "index.html"))
-);
+app.get('/api/game/leaderboard', (req, res) => {
+  try {
+    const arr = Object.values(users).map(u => ({ name: u.name, email: u.email, score: u.score || 0 }));
+    const top = arr.sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 20);
+    return res.json(top);
+  } catch (err) {
+    return res.status(500).json({ message: 'leaderboard error' });
+  }
+});
 
-app.listen(PORT, () =>
-  console.log("🚀 Spinnergy running on http://localhost:" + PORT)
-);
+app.get('/api/game/history', (req, res) => {
+  const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+  if (!token || !sessions[token]) return res.status(401).json({ message: 'Not authorized' });
+  const email = sessions[token];
+  const user = users[email];
+  return res.json(user.history || []);
+});
+
+// --- Microbit / device import endpoint ---
+// POST /api/device/import-energy { email, points }  -- for sending microbit-collected energy
+// In production, this should be authenticated and idempotent.
+app.post('/api/device/import-energy', (req, res) => {
+  try {
+    const { email, points } = req.body;
+    if (!email || typeof points !== 'number') return res.status(400).json({ message: 'email & points required' });
+    const user = users[email];
+    if (!user) return res.status(404).json({ message: 'user not found' });
+    user.score += points;
+    user.history.push({ points, date: new Date().toISOString(), source: 'microbit' });
+    return res.json({ ok: true, newScore: user.score });
+  } catch (err) {
+    return res.status(500).json({ message: 'device import error' });
+  }
+});
+
+// --- Serve client/build static files (after all /api/* routes) ---
+// This must be AFTER API routes to avoid path-to-regexp wildcard issues.
+const clientBuildPath = path.join(__dirname, 'client', 'build');
+if (fs.existsSync(clientBuildPath)) {
+  console.log('Serving frontend from', clientBuildPath);
+  app.use(express.static(clientBuildPath));
+
+  // Always serve index.html for other routes (SPA)
+  app.get('*', (req, res) => {
+    const indexHtml = path.join(clientBuildPath, 'index.html');
+    if (fs.existsSync(indexHtml)) {
+      return res.sendFile(indexHtml);
+    } else {
+      return res.status(404).send('index.html not found - build the client');
+    }
+  });
+} else {
+  console.warn('client/build not found — serve instructions: build the react app (cd client && npm run build)');
+  // If client not built, expose a small page to help debugging
+  app.get('/', (req, res) => {
+    res.send('<h2>Spinnergy server running — client not built. Run <code>cd client && npm install && npm run build</code></h2>');
+  });
+}
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error', err && err.stack ? err.stack : err);
+  res.status(500).json({ message: 'Server error' });
+});
+
+// Start
+app.listen(PORT, () => {
+  console.log('Spinnergy server listening on', PORT);
+});

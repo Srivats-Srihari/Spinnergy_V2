@@ -1,29 +1,23 @@
 import React, { useEffect, useState } from 'react';
-export default function Leaderboard(){
-  const [list, setList] = useState([]);
-  useEffect(()=> {
-    async function fetchLB(){
-      try {
-        const r = await fetch('/api/game/leaderboard');
-        const j = await r.json();
-        setList(j || []);
-      } catch (e) { console.error(e); }
+import apiFetch from '../utils/api';
+
+export default function Leaderboard() {
+  const [leaders, setLeaders] = useState([]);
+  async function load() {
+    try {
+      const data = await apiFetch('/api/game/leaderboard');
+      setLeaders(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error('leaderboard fetch', e);
     }
-    fetchLB();
-    const iv = setInterval(fetchLB, 5000);
-    return ()=>clearInterval(iv);
-  },[]);
+  }
+  useEffect(() => { load(); const iv = setInterval(load, 8000); return () => clearInterval(iv); }, []);
   return (
-    <div className="card" style={{marginTop:14}}>
-      <h3>Leaderboards</h3>
-      <ul style={{listStyle:'none', padding:0}}>
-        {list.map((u, idx) => (
-          <li key={u.id || idx} style={{display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid rgba(15,23,42,0.04)'}}>
-            <div>{idx+1}. {u.name}</div>
-            <div style={{fontWeight:700}}>{u.score}</div>
-          </li>
-        ))}
-      </ul>
+    <div className="card">
+      <h3>Leaderboard (Top)</h3>
+      <ol>
+        {leaders.map((u, i) => <li key={u.email}>{u.name} — {u.score} pts</li>)}
+      </ol>
     </div>
   );
 }

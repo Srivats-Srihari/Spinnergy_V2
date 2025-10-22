@@ -1,26 +1,21 @@
-// client/src/utils/api.js
-// Supplies a base API function the app can use. Uses REACT_APP_API_URL from env (set in build/deploy).
-const API_URL = process.env.REACT_APP_API_URL || (window && window.__API_URL__) || 'http://localhost:5000/api';
+// Helper to call backend API with base URL from env
+const API_URL = (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.replace(/\/$/, '')) || '';
 
 export async function apiFetch(endpoint, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    ...(options.headers || {}),
-  };
-  const res = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
-  // try parse JSON, but be robust to HTML error pages (avoid Unexpected token '<')
-  const text = await res.text();
+  const url = API_URL ? `${API_URL}${endpoint}` : endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const opts = Object.assign({ method: 'GET', headers: { 'Content-Type': 'application/json' } }, options);
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  const res = await fetch(url, opts);
+  const txt = await res.text();
   try {
-    const data = JSON.parse(text);
-    if (!res.ok) throw new Error(data.message || (data.error || 'API error'));
-    return data;
-  } catch (err) {
-    // If parsing failed, include the text in the error for easier debugging.
-    const msg = text && text.trim().startsWith('<') ? 'Server returned HTML. Check server or API_URL.' : err.message;
-    throw new Error(msg + ' | Raw response: ' + text.slice(0, 1000));
+    const json = JSON.parse(txt);
+    if (!res.ok) throw new Error(json.message || 'API error');
+    return json;
+  } catch (e) {
+    // If response is not JSON, return raw text for debugging
+    if (!res.ok) throw new Error(txt || 'API error');
+    return txt;
   }
 }
+
+export default apiFetch;
